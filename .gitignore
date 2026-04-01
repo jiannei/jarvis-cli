@@ -1,0 +1,22 @@
+# Rust build artifacts
+target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Scripts (temporary)
+scripts/
+
+# Lock file for libraries (keep Cargo.lock for binaries)
+Cargo.lock

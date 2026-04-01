@@ -1,0 +1,14 @@
+[package]
+name = "jarvis-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "jarvis"
+path = "src/main.rs"
+
+[dependencies]
+colored = "2"
+chrono = "0.4"
+dialoguer = "0.11"
+shellexpand = "3"
