@@ -190,10 +190,17 @@ fn optimize_dns() {
     // 备份
     backup_hosts();
 
-    // 获取最新 IP
-    let github_ip = dig_ip("github.com").unwrap_or("140.82.112.3".to_string());
-    let api_ip = dig_ip("api.github.com").unwrap_or("140.82.112.5".to_string());
-    let raw_ip = dig_ip("raw.githubusercontent.com").unwrap_or("185.199.108.133".to_string());
+    println!("{}", "测试 IP 延迟，选择最快的...".yellow());
+
+    // 获取延迟最低的 IP
+    let (github_ip, github_latency) = resolve_with_latency("github.com");
+    let (api_ip, api_latency) = resolve_with_latency("api.github.com");
+    let (raw_ip, raw_latency) = resolve_with_latency("raw.githubusercontent.com");
+
+    println!("  github.com: {} ({}ms)", github_ip, github_latency.unwrap_or(-1));
+    println!("  api.github.com: {} ({}ms)", api_ip, api_latency.unwrap_or(-1));
+    println!("  raw.githubusercontent.com: {} ({}ms)", raw_ip, raw_latency.unwrap_or(-1));
+    println!();
 
     // 移除旧的 GitHub 记录
     let _ = Command::new("sudo")
@@ -241,15 +248,65 @@ fn optimize_dns() {
     );
 }
 
-fn dig_ip(domain: &str) -> Option<String> {
-    if let Ok(output) = Command::new("dig").arg("+short").arg(domain).output() {
+fn test_ip_latency(ip: &str, timeout: u64) -> Option<i64> {
+    if let Ok(output) = Command::new("ping")
+        .args(["-c", "1", "-W", &timeout.to_string(), ip])
+        .output()
+    {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let ip = stdout.lines().next().unwrap_or("").trim();
-        if !ip.is_empty() {
-            return Some(ip.to_string());
+        for line in stdout.lines() {
+            if line.contains("rtt") || line.contains("round-trip") {
+                let parts: Vec<&str> = line.split('/').collect();
+                if parts.len() >= 5 {
+                    if let Ok(ms) = parts[4].trim().parse::<f64>() {
+                        return Some(ms as i64);
+                    }
+                }
+            }
         }
     }
     None
+}
+
+fn resolve_with_latency(domain: &str) -> (String, Option<i64>) {
+    // 先用 dig 获取当前解析的 IP 列表
+    let mut ips: Vec<String> = Vec::new();
+
+    if let Ok(output) = Command::new("dig").arg("+short").arg(domain).output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let ip = line.trim();
+            if !ip.is_empty() && ip.contains('.') {
+                ips.push(ip.to_string());
+            }
+        }
+    }
+
+    // 如果 dig 没获取到，使用备用 IP 池
+    if ips.is_empty() {
+        ips = match domain {
+            "github.com" => vec!["140.82.112.3", "140.82.113.3", "140.82.114.3"].into_iter().map(String::from).collect(),
+            "api.github.com" => vec!["140.82.112.5", "140.82.113.5", "140.82.114.5"].into_iter().map(String::from).collect(),
+            "raw.githubusercontent.com" => vec!["185.199.108.133", "185.199.109.133", "185.199.110.133", "185.199.111.133"].into_iter().map(String::from).collect(),
+            _ => vec![],
+        };
+    }
+
+    println!("  {} 可选 IP: {:?}", domain, ips);
+
+    let mut best_ip = ips.first().unwrap().to_string();
+    let mut best_latency: Option<i64> = None;
+
+    for ip in &ips {
+        if let Some(latency) = test_ip_latency(ip, 2) {
+            if best_latency.is_none() || latency < best_latency.unwrap() {
+                best_ip = ip.to_string();
+                best_latency = Some(latency);
+            }
+        }
+    }
+
+    (best_ip, best_latency)
 }
 
 fn config_git_mirror() {
