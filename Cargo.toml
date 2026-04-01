@@ -2,6 +2,12 @@
 name = "jarvis-cli"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "J.A.R.V.I.S."
+repository = "https://github.com/jiannei/jarvis-cli"
+homepage = "https://github.com/jiannei/jarvis-cli"
+keywords = ["cli"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "jarvis"
