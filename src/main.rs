@@ -73,7 +73,7 @@ fn interactive_mode() {
             "测试 GitHub 连接",
             "查看当前配置",
             "自动测速 - 选择最快的方式",
-            "退出",
+            "恢复默认并退出",
         ];
 
         let selection = Select::new()
@@ -91,6 +91,7 @@ fn interactive_mode() {
             5 => show_config(),
             6 => auto_speed_test(),
             7 => {
+                restore_default();
                 println!("{}", "退出".green());
                 std::process::exit(0);
             }
@@ -760,4 +761,52 @@ fn auto_speed_test() {
 
     println!();
     println!("{}", "配置已应用！".green());
+}
+
+fn restore_default() {
+    println!("{}", "恢复默认设置...".yellow());
+    println!();
+
+    // 查找最新的 hosts 备份
+    let mut backup_files: Vec<String> = Vec::new();
+    if let Ok(entries) = fs::read_dir("/etc") {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with("hosts.bak.") {
+                backup_files.push(entry.path().to_string_lossy().to_string());
+            }
+        }
+    }
+
+    if !backup_files.is_empty() {
+        backup_files.sort();
+        if let Some(latest_backup) = backup_files.last() {
+            println!("找到备份：{}", latest_backup);
+            let confirm = Confirm::new()
+                .with_prompt("是否恢复 hosts?")
+                .default(false)
+                .interact()
+                .unwrap();
+            if confirm {
+                Command::new("sudo")
+                    .arg("cp")
+                    .arg(latest_backup)
+                    .arg("/etc/hosts")
+                    .status()
+                    .expect("恢复 hosts 失败");
+                println!("{}", "✓ hosts 已恢复".green());
+            }
+        }
+    }
+
+    // 移除 Git 镜像配置
+    let _ = run_git(&["config", "--global", "--unset", &format!("url.{}/.insteadOf", MIRROR_URL)]);
+    let _ = run_git(&["config", "--global", "--unset", &format!("url.{}/.insteadOf", MIRROR_URL_BACKUP)]);
+
+    // 移除 Git 代理
+    let _ = run_git(&["config", "--global", "--unset", "http.proxy"]);
+    let _ = run_git(&["config", "--global", "--unset", "https.proxy"]);
+
+    println!("{}", "✓ 已恢复默认设置".green());
 }
