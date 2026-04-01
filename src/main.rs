@@ -1,7 +1,7 @@
+use clap::{Parser, Subcommand};
 use colored::Colorize;
 use dialoguer::{Confirm, Input, Select};
 use std::fs;
-use std::io::{self, BufRead};
 use std::process::Command;
 
 // 镜像源配置
@@ -11,7 +11,54 @@ const MIRROR_URL_BACKUP: &str = "https://gitclone.com";
 // 测速端点
 const GITHUB_TEST_URL: &str = "https://github.com";
 
+#[derive(Parser)]
+#[command(name = "jarvis")]
+#[command(author = "Jiannei")]
+#[command(version = "0.1.0")]
+#[command(about = "GitHub 访问加速工具", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// 直连模式 - 优化 DNS/hosts
+    Direct,
+    /// 镜像模式 - 配置 Git 镜像加速
+    Mirror,
+    /// 代理模式 - 配置 Git 代理
+    Proxy {
+        /// 代理服务器地址 (例如：127.0.0.1:7890)
+        #[arg(short, long)]
+        addr: Option<String>,
+    },
+    /// SSH 模式 - 配置 SSH 密钥
+    Ssh,
+    /// 测试 GitHub 连接
+    Test,
+    /// 查看当前配置
+    Config,
+    /// 自动测速 - 选择最快的方式
+    SpeedTest,
+}
+
 fn main() {
+    let cli = Cli::parse();
+
+    match &cli.command {
+        Some(Commands::Direct) => optimize_dns(),
+        Some(Commands::Mirror) => config_git_mirror(),
+        Some(Commands::Proxy { addr }) => config_proxy(addr.clone()),
+        Some(Commands::Ssh) => setup_ssh(),
+        Some(Commands::Test) => test_connection(),
+        Some(Commands::Config) => show_config(),
+        Some(Commands::SpeedTest) => auto_speed_test(),
+        None => interactive_mode(),
+    }
+}
+
+fn interactive_mode() {
     println!("{}", "========================================".blue());
     println!("{}", "   GitHub 访问加速工具".blue());
     println!("{}", "========================================".blue());
@@ -19,14 +66,14 @@ fn main() {
 
     loop {
         let choices = vec![
-            "1) 直连模式 - 优化 DNS/hosts",
-            "2) 镜像模式 - 配置 Git 镜像加速",
-            "3) 代理模式 - 配置 Git 代理 (需要代理服务器)",
-            "4) SSH 模式 - 配置 SSH 密钥",
-            "5) 测试 GitHub 连接",
-            "6) 查看当前配置",
-            "7) 自动测速 - 选择最快的方式",
-            "0) 恢复默认并退出",
+            "直连模式 - 优化 DNS/hosts",
+            "镜像模式 - 配置 Git 镜像加速",
+            "代理模式 - 配置 Git 代理 (需要代理服务器)",
+            "SSH 模式 - 配置 SSH 密钥",
+            "测试 GitHub 连接",
+            "查看当前配置",
+            "自动测速 - 选择最快的方式",
+            "退出",
         ];
 
         let selection = Select::new()
@@ -38,13 +85,12 @@ fn main() {
         match selection {
             0 => optimize_dns(),
             1 => config_git_mirror(),
-            2 => config_proxy(),
+            2 => config_proxy(None),
             3 => setup_ssh(),
             4 => test_connection(),
             5 => show_config(),
             6 => auto_speed_test(),
             7 => {
-                restore_default();
                 println!("{}", "退出".green());
                 std::process::exit(0);
             }
@@ -52,8 +98,6 @@ fn main() {
         }
 
         println!();
-        println!("{}", "按回车继续...".blue());
-        io::stdin().lock().lines().next();
     }
 }
 
@@ -223,10 +267,10 @@ fn config_git_mirror() {
     println!();
 
     let choices = vec![
-        "1) 启用镜像模式",
-        "2) 禁用镜像模式",
-        "3) 查看镜像配置状态",
-        "0) 返回",
+        "启用镜像模式",
+        "禁用镜像模式",
+        "查看镜像配置状态",
+        "返回",
     ];
 
     let selection = Select::new()
@@ -266,7 +310,7 @@ fn config_git_mirror() {
                 println!("{}", output);
             }
         }
-        _ => println!("已取消"),
+        _ => {}
     }
 }
 
@@ -277,14 +321,18 @@ fn run_git(args: &[&str]) -> String {
     String::new()
 }
 
-fn config_proxy() {
+fn config_proxy(addr: Option<String>) {
     println!("{}", "配置 Git 代理...".yellow());
     println!();
 
-    let proxy_addr: String = Input::new()
-        .with_prompt("输入代理服务器地址 (例如：127.0.0.1:7890)")
-        .interact_text()
-        .unwrap();
+    let proxy_addr = if let Some(addr) = addr {
+        addr
+    } else {
+        Input::new()
+            .with_prompt("输入代理服务器地址 (例如：127.0.0.1:7890)")
+            .interact_text()
+            .unwrap()
+    };
 
     if proxy_addr.is_empty() {
         println!("已取消");
@@ -712,52 +760,4 @@ fn auto_speed_test() {
 
     println!();
     println!("{}", "配置已应用！".green());
-}
-
-fn restore_default() {
-    println!("{}", "恢复默认设置...".yellow());
-    println!();
-
-    // 查找最新的 hosts 备份
-    let mut backup_files: Vec<String> = Vec::new();
-    if let Ok(entries) = fs::read_dir("/etc") {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str.starts_with("hosts.bak.") {
-                backup_files.push(entry.path().to_string_lossy().to_string());
-            }
-        }
-    }
-
-    if !backup_files.is_empty() {
-        backup_files.sort();
-        if let Some(latest_backup) = backup_files.last() {
-            println!("找到备份：{}", latest_backup);
-            let confirm = Confirm::new()
-                .with_prompt("是否恢复 hosts?")
-                .default(false)
-                .interact()
-                .unwrap();
-            if confirm {
-                Command::new("sudo")
-                    .arg("cp")
-                    .arg(latest_backup)
-                    .arg("/etc/hosts")
-                    .status()
-                    .expect("恢复 hosts 失败");
-                println!("{}", "✓ hosts 已恢复".green());
-            }
-        }
-    }
-
-    // 移除 Git 镜像配置
-    let _ = run_git(&["config", "--global", "--unset", &format!("url.{}/.insteadOf", MIRROR_URL)]);
-    let _ = run_git(&["config", "--global", "--unset", &format!("url.{}/.insteadOf", MIRROR_URL_BACKUP)]);
-
-    // 移除 Git 代理
-    let _ = run_git(&["config", "--global", "--unset", "http.proxy"]);
-    let _ = run_git(&["config", "--global", "--unset", "https.proxy"]);
-
-    println!("{}", "✓ 已恢复默认设置".green());
 }
